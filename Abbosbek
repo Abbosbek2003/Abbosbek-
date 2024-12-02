@@ -1,0 +1,121 @@
+import random
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from PIL import Image
+import requests
+import io
+
+# Admin ID va tokenni o'rnatish
+ADMIN_ID = 2099922900
+BOT_TOKEN = "7769995757:AAFLyAo1o46X5GWh-djiiJxIOUhZmKrQc-s"
+REQUIRED_CHANNELS = ["@kanal1", "@kanal2"]  # Tekshiriladigan kanallar
+
+# Logger sozlash
+import logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# Ma'lumotlarni saqlash uchun vaqtincha bazalar
+users = {}
+ratings = {}
+uploaded_photos = set()  # Yuborilgan rasmlar `file_id` bazasi
+
+# Kanalga a'zo bo'lishni tekshirish
+def check_membership(user_id, bot):
+    for channel in REQUIRED_CHANNELS:
+        status = bot.get_chat_member(chat_id=channel, user_id=user_id).status
+        if status not in ("member", "administrator", "creator"):
+            return False
+    return True
+
+# Rasmlarni baholash
+def evaluate_image(file_id, bot):
+    file = bot.get_file(file_id)
+    file_url = file.file_path
+    response = requests.get(file_url)
+    img = Image.open(io.BytesIO(response.content))
+    
+    # Rasmlarni avtomatik baholash (mock AI)
+    quality_score = random.randint(1, 10)  # Tasodifiy ball
+    return quality_score
+
+# O'yin haqida ma'lumot beruvchi xabar
+def start(update: Update, context: CallbackContext):
+    user = update.message.from_user
+    if not check_membership(user.id, context.bot):
+        channels = "\n".join(REQUIRED_CHANNELS)
+        update.message.reply_text(f"Botdan foydalanish uchun quyidagi kanallarga a'zo bo'ling:\n{channels}")
+        return
+
+    update.message.reply_text(
+        "Xush kelibsiz 'Boshqa dunyo ostonasi' o'yiniga!\n\n"
+        "1. Rasmingizni yuboring va avtomatik baho oling.\n"
+        "2. Reytingda yuqoriga chiqish uchun eng chiroyli rasmlarni yuboring.\n"
+        "3. Nomaqbul rasmlar yuborish taqiqlanadi. Qoidabuzarlar bloklanadi.\n\n"
+        "Boshqaruv buyrug'lari:\n"
+        "/top - Reytingni ko'rish\n"
+        "/rules - Qoidalarni ko'rish"
+    )
+
+# Rasmlar qabul qilish
+def photo_handler(update: Update, context: CallbackContext):
+    user = update.message.from_user
+    if not check_membership(user.id, context.bot):
+        channels = "\n".join(REQUIRED_CHANNELS)
+        update.message.reply_text(f"Botdan foydalanish uchun quyidagi kanallarga a'zo bo'ling:\n{channels}")
+        return
+
+    file_id = update.message.photo[-1].file_id
+    if file_id in uploaded_photos:
+        update.message.reply_text("❗ Bu rasm avval yuklangan. Iltimos, boshqa rasm yuboring.")
+        return
+
+    uploaded_photos.add(file_id)
+    quality_score = evaluate_image(file_id, context.bot)
+    
+    if user.id not in users:
+        users[user.id] = {"name": user.full_name, "score": 0}
+    users[user.id]["score"] += quality_score
+
+    # Reytingni yangilash
+    global top_100
+    top_100 = sorted(users.values(), key=lambda x: x["score"], reverse=True)[:100]
+
+    context.bot.send_photo(chat_id=ADMIN_ID, photo=file_id, caption=f"Rasm {user.full_name} ({user.id}) tomonidan yuborildi.")
+    update.message.reply_text(f"✅ Rasm qabul qilindi! Sizga {quality_score} ball berildi.")
+
+# Reytingni ko'rsatish
+def show_top(update: Update, context: CallbackContext):
+    global top_100
+    if not top_100:
+        update.message.reply_text("Hozircha reyting bo'sh.")
+        return
+
+    reply_text = "🏆 Top 100 Foydalanuvchilar:\n\n"
+    for rank, user in enumerate(top_100, start=1):
+        reply_text += f"{rank}. {user['name']} - {user['score']} ball\n"
+    update.message.reply_text(reply_text)
+
+# Qoidalarni ko'rsatish
+def show_rules(update: Update, context: CallbackContext):
+    update.message.reply_text(
+        "Qoidalar:\n"
+        "1. Faqat chiroyli va sifatli rasmlar yuboring.\n"
+        "2. Yalang'och yoki nomaqbul rasmlar yuborish taqiqlanadi. Qoidabuzarlar bloklanadi.\n"
+        "3. Reytingda yuqoriga chiqish uchun ball to'plang!"
+    )
+
+# Botni ishga tushirish
+def main():
+    updater = Updater(token=BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("top", show_top))
+    dp.add_handler(CommandHandler("rules", show_rules))
+    dp.add_handler(MessageHandler(Filters.photo, photo_handler))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
