@@ -1,0 +1,2 @@
+# Abbosbek-
+Boshqa dunyo ostonasi 
